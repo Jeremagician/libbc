@@ -8,13 +8,13 @@ It might become a distributed system library algorithm collection later on.
 
 Design
 ------
--- Please note that since the library is in an early development
--- stage, the design might quickly change from one version to another.
-
+Please note that since the library is in an early development
+stage, the design might quickly change from one version to another.
+___
 The implementation is intented to avoid dynamic allocation as much as
 possible.  It's build around an `struct bc_group` type which is an
 opaque type, one can still allocate the data on the stack thanks to
-`alloca()` and the provided `size_t bc_group_struct_size(void);`
+`alloca()` and the provided `size_t bc_group_struct_size(void)`
 functions.
 
 The communication is built over the TCP network stack and using file
@@ -34,8 +34,11 @@ of use in the `example` folder.  It contains a chat client named
 `miaou` using uniform reliable broadcast to send and receive messages.
 
 To build the library you will need cmake:
+
+```bash
 $ mkdir build && cd build
 $ cmake ..
 $ make && make install
+```
 
 Api specification can be found in `include/bc.h`.
