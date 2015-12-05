@@ -8,9 +8,6 @@ It might become a distributed system library algorithm collection later on.
 
 Design
 ------
-Please note that since the library is in an early development
-stage, the design might quickly change from one version to another.
-___
 The implementation is intented to avoid dynamic allocation as much as
 possible.  It's build around an `struct bc_group` type which is an
 opaque type, one can still allocate the data on the stack thanks to
@@ -26,6 +23,10 @@ to the group.  This choice is motivated by the desire to be the least
 intrusive for the programmer; it's very common to work with file
 descriptors in C.
 
+___
+Please note that since the library is in an early development
+stage, the design might quickly change from one version to another.
+___
 
 How to?
 -------
