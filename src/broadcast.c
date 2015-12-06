@@ -100,7 +100,6 @@ static int start_server(int *fd, char *host, char *port, struct sockaddr *addr)
 	struct addrinfo *result, *rp;
 	int sfd, rc;
 
-
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC; /* Allow IPv4 or IPv6 */
 	hints.ai_socktype = SOCK_STREAM;
@@ -145,7 +144,6 @@ static int start_server(int *fd, char *host, char *port, struct sockaddr *addr)
 	/* We set non blocking socket to use polling */
 	if (ioctl(sfd, FIONBIO, (char*)&rc) < 0)
 		return 1;
-
 
 	if (listen(sfd, MAX_LISTEN_QUEUE) != 0)
 		return 1;
@@ -262,7 +260,7 @@ static int bootstrap(char *target_host, char *target_port,
 
 	printf("Started server on %s:%i\n",
 		   straddr(&grp->nodes[0].addr),
-		   ntohs(get_in_port(&grp->nodes[grp->size].addr)));
+		   ntohs(get_in_port(&grp->nodes[0].addr)));
 
 	return 0;
 
