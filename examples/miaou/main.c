@@ -62,19 +62,24 @@ int main(int argc, char *argv[])
 	for (;;)
 	{
 		struct bc_event ev;
-		bc_poll(grp, &ev, 200);
 
-		switch (ev.type)
+		if (bc_poll(grp, &ev, 200) > 0)
 		{
-		case BC_JOIN:
-			break;
-		case BC_LEAVE:
-			break;
-		case BC_DEAD:
-			break;
-		case BC_DELIVER:
-			break;
-
+			switch (ev.type)
+			{
+			case BC_JOIN:
+				puts("join");
+				break;
+			case BC_LEAVE:
+				puts("leave");
+				break;
+			case BC_DEAD:
+				puts("dead");
+				break;
+			case BC_DELIVER:
+				puts("deliver");
+				break;
+			}
 		}
 	}
 

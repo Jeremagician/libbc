@@ -332,12 +332,59 @@ static int handle_newcon(struct bc_group *grp)
 	return grp->size++;
 }
 
+
+/* Push an event to the grp event queue
+ * Return values:
+ * NULL if the queue is full
+ * pointer to the pushed event otherwise */
+static struct bc_event *push_event(struct bc_group *grp, int type,
+								  struct sockaddr *addr)
+{
+	int idx;
+	struct bc_event *ev;
+
+	if (grp->elen >= EVENT_QUEUE_CAPACITY)
+		return NULL;
+
+	idx = (grp->eidx + grp->elen) % EVENT_QUEUE_CAPACITY;
+	grp->elen++;
+
+	ev = &grp->equeue[idx];
+	ev->type = type;
+	ev->addr = *addr;
+	gettimeofday(&ev->localstamp, NULL);
+
+	return ev;
+}
+
+/* pop the event on top of the event queue in the ev parameter.
+ * Return values:
+ * -1 if the queue is empty
+ * 0 otherwise */
+static int pop_event(struct bc_group *grp, struct bc_event *ev)
+{
+	if (grp->elen <= 0)
+		return -1;
+
+	*ev = grp->equeue[grp->eidx];
+	grp->elen--;
+	grp->eidx = (grp->eidx + 1) % EVENT_QUEUE_CAPACITY;
+	return 0;
+}
+
 int bc_poll(struct bc_group *grp, struct bc_event *ev, int timeout)
 {
 	int ret;
 	assert(grp != NULL);
 	assert(ev != NULL);
 
+	/* TODO(Jeremy): Change the whole logic behind this function,
+	   here is some hints:
+	   - first poll with 0 timeout to see if something happened
+	   - move in a new function the poll handling
+	   - if the event queue is not empty, return the event
+	   - otherwise call poll with used provided timeout
+	*/
 	ret = poll(grp->pfds, grp->size, timeout);
 	if (ret > 0)
 	{
@@ -354,6 +401,7 @@ int bc_poll(struct bc_group *grp, struct bc_event *ev, int timeout)
 
 					if (rc != -1)
 					{
+						push_event(grp, BC_JOIN, &grp->nodes[rc].addr);
 						printf("%s:%i joined.\n",
 							   straddr(&grp->nodes[rc].addr),
 							   ntohs(get_in_port(&grp->nodes[rc].addr)));
@@ -371,6 +419,8 @@ int bc_poll(struct bc_group *grp, struct bc_event *ev, int timeout)
 	else
 		return -1;
 
+	if (pop_event(grp, ev) == 0)
+		return 1;
 
 	return 0;
 }
