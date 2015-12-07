@@ -13,6 +13,15 @@
 #include <netinet/in.h>
 #include <errno.h>
 
+/* TODO(Jeremy): split this files in smaller shards
+ * it's becoming TOOO BIGGG.
+ * Maybe try something like:
+ * - bc.c containing api function implem
+ * - event.c functions handling events in the group
+ * - network.c functions handling network things
+ * */
+
+
 /* All defined limits below may are used
  * in statically allocated data, dynamic
  * allocation should be used in some cases */
@@ -226,7 +235,7 @@ static int bootstrap(char *target_host, char *target_port,
 					 char *self_host, char *self_port,
 					 struct bc_group *grp, int chan[2])
 {
-	int ret, serrno = 0;
+	int ret, serrno, err = 0;
 
 	*grp = ZERO_GROUP;
 
@@ -238,6 +247,11 @@ static int bootstrap(char *target_host, char *target_port,
 	if (ret != 0)
 		return ret;
 
+	/* Below operation are error system
+	 * we set err here because it's returned in case of error */
+	err = 1;
+
+	/* We set up channels using unix pipe */
 	if (pipe(grp->inp) != 0)
 		GOTO_FAIL(inp);
 
@@ -255,7 +269,14 @@ static int bootstrap(char *target_host, char *target_port,
 	{
 		target_port = target_port == NULL ? DEFAULT_PORT : target_port;
 		grp->size++;
-		connect_server(&grp->nodes[1].fd, target_host, target_port, &grp->nodes[1].addr);
+
+		/* Try to join the node from the group */
+		if ((ret = connect_server(&grp->nodes[1].fd, target_host, target_port,
+								  &grp->nodes[1].addr)) != 0)
+		{
+			err = ret;
+			GOTO_FAIL(connect);
+		}
 	}
 
 	printf("Started server on %s:%i\n",
@@ -264,14 +285,19 @@ static int bootstrap(char *target_host, char *target_port,
 
 	return 0;
 
+fail_connect:
+	close(grp->outp[0]);
+	close(grp->outp[1]);
 fail_outp:
 	close(grp->inp[0]);
 	close(grp->inp[1]);
 fail_inp:
 	close(grp->nodes[0].fd);
 
+	/* We retore errno in case of fail from close calls
+	 * serrno is set by teh GOTO_FAIL macro */
 	errno = serrno;
-	return 1;
+	return err;
 }
 
 int bc_init(char *self_host, char *self_port,
@@ -308,7 +334,7 @@ static int handle_newcon(struct bc_group *grp)
 {
 	int ret;
 	struct sockaddr addr;
-	socklen_t alen;
+	socklen_t alen = sizeof(struct sockaddr);
 
 	if (grp->size >= MAX_GRP_SIZE)
 	{
@@ -318,7 +344,7 @@ static int handle_newcon(struct bc_group *grp)
 
 	ret = accept(grp->nodes[0].fd, &addr, &alen);
 
-	if (ret == -1)
+	if (ret < 0)
 	{
 		/* This in fact should not happen
 		 * find an elegant way to handle the case.
@@ -372,6 +398,41 @@ static int pop_event(struct bc_group *grp, struct bc_event *ev)
 	return 0;
 }
 
+static void handle_poll(struct bc_group *grp)
+{
+	int i;
+	for (i = 0; i < grp->size; i++)
+	{
+		if (grp->pfds[i].revents & POLLIN)
+		{
+			/* In this case we have clients trying to connect */
+			if (grp->pfds[i].fd == grp->nodes[0].fd)
+			{
+				int rc;
+
+				/* Using goto here allow us to avoid code redundancy */
+				goto hdl_con;
+
+				while (rc != -1)
+				{
+					push_event(grp, BC_JOIN, &grp->nodes[rc].addr);
+					printf("%s:%i joined.\n",
+						   straddr(&grp->nodes[rc].addr),
+						   ntohs(get_in_port(&grp->nodes[rc].addr)));
+
+
+				hdl_con:
+					rc = handle_newcon(grp);
+				}
+			}
+			/* We receive data from one other node */
+			else
+			{
+			}
+		}
+	}
+}
+
 int bc_poll(struct bc_group *grp, struct bc_event *ev, int timeout)
 {
 	int ret;
@@ -380,40 +441,14 @@ int bc_poll(struct bc_group *grp, struct bc_event *ev, int timeout)
 
 	/* TODO(Jeremy): Change the whole logic behind this function,
 	   here is some hints:
-	   - first poll with 0 timeout to see if something happened
-	   - move in a new function the poll handling
-	   - if the event queue is not empty, return the event
-	   - otherwise call poll with used provided timeout
+	   - [ ] first poll with 0 timeout to see if something happened
+	   - [X] move in a new function the poll handling
+	   - [ ] if the event queue is not empty, return the event
+	   - [ ] otherwise call poll with used provided timeout
 	*/
 	ret = poll(grp->pfds, grp->size, timeout);
 	if (ret > 0)
-	{
-		int i;
-		/* TODO: REWRITE THIS UGLY CODE ARGGL*/
-		for (i = 0; i < grp->size; i++)
-		{
-			if (grp->pfds[i].revents & POLLIN)
-			{
-				if (grp->pfds[i].fd == grp->nodes[0].fd)
-				{
-					int rc;
-					rc = handle_newcon(grp);
-
-					if (rc != -1)
-					{
-						push_event(grp, BC_JOIN, &grp->nodes[rc].addr);
-						printf("%s:%i joined.\n",
-							   straddr(&grp->nodes[rc].addr),
-							   ntohs(get_in_port(&grp->nodes[rc].addr)));
-					}
-				}
-				else
-				{
-				}
-			}
-		}
-
-	}
+		handle_poll(grp);
 	else if (ret == 0)
 		return 0;
 	else
