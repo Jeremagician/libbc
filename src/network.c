@@ -13,18 +13,18 @@
 /* get port (IPv4 or IPv6) */
 in_port_t get_in_port(struct sockaddr *sa)
 {
-    if (sa->sa_family == AF_INET)
-        return (((struct sockaddr_in*)sa)->sin_port);
-    return (((struct sockaddr_in6*)sa)->sin6_port);
+	if (sa->sa_family == AF_INET)
+		return (((struct sockaddr_in*)sa)->sin_port);
+	return (((struct sockaddr_in6*)sa)->sin6_port);
 }
 
 /* return the sockaddr_in depending on current
  * family used (IPv4, v6) */
 void *get_in_addr(struct sockaddr *sa)
 {
-    if (sa->sa_family == AF_INET)
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+	if (sa->sa_family == AF_INET)
+		return &(((struct sockaddr_in*)sa)->sin_addr);
+	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
 char *straddr(struct sockaddr *sa)

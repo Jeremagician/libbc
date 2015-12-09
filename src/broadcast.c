@@ -111,7 +111,7 @@ int bc_init(char *self_host, char *self_port,
 {
 	assert(grp != NULL);
 	assert(chan != NULL);
-    return bootstrap(NULL, NULL, self_host, self_port, grp, chan);
+	return bootstrap(NULL, NULL, self_host, self_port, grp, chan);
 }
 
 int bc_join(char *target_host, char *target_port,
