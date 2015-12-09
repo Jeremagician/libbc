@@ -92,7 +92,7 @@ void bc_leave(struct bc_group *grp);
  * Return value:
  * -1 if an error occured (see errno)
  * 0 time limit expires without event caughts
- * > 0 indicate the number of event in the event queue
+ * 1 if an event has been successful polled in the ev variable
  */
 int bc_poll(struct bc_group *grp, struct bc_event *ev, int timeout);
 

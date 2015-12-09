@@ -330,34 +330,6 @@ void bc_leave(struct bc_group *grp)
 	}
 }
 
-static int handle_newcon(struct bc_group *grp)
-{
-	int ret;
-	struct sockaddr addr;
-	socklen_t alen = sizeof(struct sockaddr);
-
-	if (grp->size >= MAX_GRP_SIZE)
-	{
-		/* Group is full ! */
-		return -1;
-	}
-
-	ret = accept(grp->nodes[0].fd, &addr, &alen);
-
-	if (ret < 0)
-	{
-		/* This in fact should not happen
-		 * find an elegant way to handle the case.
-		 * Maybe just returns ? */
-		return -1;
-	}
-
-	grp->nodes[grp->size].fd = ret;
-	grp->nodes[grp->size].addr = addr;
-
-	return grp->size++;
-}
-
 
 /* Push an event to the grp event queue
  * Return values:
@@ -398,6 +370,54 @@ static int pop_event(struct bc_group *grp, struct bc_event *ev)
 	return 0;
 }
 
+static int accept_client(struct bc_group *grp)
+{
+	int ret;
+	struct sockaddr addr;
+	socklen_t alen = sizeof(struct sockaddr);
+
+	if (grp->size >= MAX_GRP_SIZE)
+	{
+		/* Group is full ! */
+		return -1;
+	}
+
+	ret = accept(grp->nodes[0].fd, &addr, &alen);
+
+	if (ret < 0)
+	{
+		/* This in fact should not happen
+		 * find an elegant way to handle the case.
+		 * Maybe just returns ? */
+		return -1;
+	}
+
+	grp->nodes[grp->size].fd = ret;
+	grp->nodes[grp->size].addr = addr;
+
+	return grp->size++;
+}
+
+static void handle_connects(struct bc_group *grp)
+{
+	int rc;
+
+	/* Using goto here allow us to avoid code redundancy */
+	goto hdl_con;
+
+	while (rc != -1)
+	{
+		push_event(grp, BC_JOIN, &grp->nodes[rc].addr);
+		printf("%s:%i joined.\n",
+			   straddr(&grp->nodes[rc].addr),
+			   ntohs(get_in_port(&grp->nodes[rc].addr)));
+
+
+	hdl_con:
+		rc = accept_client(grp);
+	}
+}
+
 static void handle_poll(struct bc_group *grp)
 {
 	int i;
@@ -407,28 +427,10 @@ static void handle_poll(struct bc_group *grp)
 		{
 			/* In this case we have clients trying to connect */
 			if (grp->pfds[i].fd == grp->nodes[0].fd)
-			{
-				int rc;
-
-				/* Using goto here allow us to avoid code redundancy */
-				goto hdl_con;
-
-				while (rc != -1)
-				{
-					push_event(grp, BC_JOIN, &grp->nodes[rc].addr);
-					printf("%s:%i joined.\n",
-						   straddr(&grp->nodes[rc].addr),
-						   ntohs(get_in_port(&grp->nodes[rc].addr)));
-
-
-				hdl_con:
-					rc = handle_newcon(grp);
-				}
-			}
+				handle_connects(grp);
 			/* We receive data from one other node */
 			else
-			{
-			}
+				handle_receive(grp);
 		}
 	}
 }
@@ -439,21 +441,28 @@ int bc_poll(struct bc_group *grp, struct bc_event *ev, int timeout)
 	assert(grp != NULL);
 	assert(ev != NULL);
 
-	/* TODO(Jeremy): Change the whole logic behind this function,
-	   here is some hints:
-	   - [ ] first poll with 0 timeout to see if something happened
-	   - [X] move in a new function the poll handling
-	   - [ ] if the event queue is not empty, return the event
-	   - [ ] otherwise call poll with used provided timeout
-	*/
-	ret = poll(grp->pfds, grp->size, timeout);
+	ret = poll(grp->pfds, grp->size, 0);
+
 	if (ret > 0)
 		handle_poll(grp);
-	else if (ret == 0)
-		return 0;
-	else
+	else if (ret == -1)
 		return -1;
 
+	if (pop_event(grp, ev) == 0)
+		return 1;
+
+	/* If we are here, this mean that no event occured on the file descriptors
+	 * and the event queue is empty, we now poll with used provided timeout */
+
+	ret = poll(grp->pfds, grp->size, timeout);
+
+	if (ret > 0)
+		handle_poll(grp);
+	else
+		return ret;
+
+	/* A new event may have pushed in the last poll_handle
+	 * we try to pop */
 	if (pop_event(grp, ev) == 0)
 		return 1;
 
