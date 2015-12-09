@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <errno.h>
+#include <stdint.h>
 
 /* TODO(Jeremy): split this files in smaller shards
  * it's becoming TOOO BIGGG.
@@ -19,6 +20,7 @@
  * - bc.c containing api function implem
  * - event.c functions handling events in the group
  * - network.c functions handling network things
+ * - group.c
  * */
 
 
@@ -63,6 +65,14 @@ struct bc_group
 
 	struct bc_msg_ack pending_msg[MAX_PENDING_MSG];
 	int pending_msg_len;
+};
+
+enum opcode
+{
+	OP_HEARTBEAT,
+	OP_JOIN,
+	OP_MSG,
+	OP_LEAVE
 };
 
 static struct bc_group ZERO_GROUP;
@@ -418,6 +428,18 @@ static void handle_connects(struct bc_group *grp)
 	}
 }
 
+static void handle_receive(struct bc_group *grp, int node)
+{
+	ssize_t rb;
+	uint8_t opcode;
+
+	rb = read(grp->nodes[node].fd, &opcode, sizeof(opcode));
+
+	/* TODO(Jeremy): Do not assert and write real code ... */
+	assert(rb == sizeof(opcode));
+	/* TODO(Jeremy): Switch beetween opcode */
+}
+
 static void handle_poll(struct bc_group *grp)
 {
 	int i;
@@ -430,7 +452,7 @@ static void handle_poll(struct bc_group *grp)
 				handle_connects(grp);
 			/* We receive data from one other node */
 			else
-				handle_receive(grp);
+				handle_receive(grp, i);
 		}
 	}
 }
