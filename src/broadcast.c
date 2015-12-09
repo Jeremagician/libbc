@@ -1,12 +1,8 @@
-#include <bc.h>
 #include <assert.h>
-#include <stddef.h>
 #include <stdio.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <netdb.h>
 #include <string.h>
 #include <poll.h>
 #include <arpa/inet.h>
@@ -14,215 +10,15 @@
 #include <errno.h>
 #include <stdint.h>
 
-/* TODO(Jeremy): split this files in smaller shards
- * it's becoming TOOO BIGGG.
- * Maybe try something like:
- * - bc.c containing api function implem
- * - event.c functions handling events in the group
- * - network.c functions handling network things
- * - group.c
- * */
-
-
-/* All defined limits below may are used
- * in statically allocated data, dynamic
- * allocation should be used in some cases */
-#define DEFAULT_PORT            "4242"
-#define DEFAULT_HOST            "0.0.0.0"
-#define MAX_GRP_SIZE            256
-#define HEARTBEAT_FREQUENCY     5000
-#define MAX_PENDING_MSG         1024
-#define MAX_LISTEN_QUEUE        16
-#define EVENT_QUEUE_CAPACITY    128
-
-
-struct bc_node
-{
-	int fd;
-	struct sockaddr addr;
-	struct timeval last_hb_sent;
-	struct timeval last_hb_recv;
-};
-
-struct bc_msg_ack
-{
-	uint64_t id;
-	int acks[MAX_GRP_SIZE];
-};
-
-struct bc_group
-{
-	int inp[2]; /* Input pipe */
-	int outp[2]; /* Output pipe */
-
-	int size; /* How many nodes are in the group */
-	struct pollfd pfds[MAX_GRP_SIZE];
-	struct bc_node nodes[MAX_GRP_SIZE];
-
-	struct bc_event equeue[EVENT_QUEUE_CAPACITY];
-	int eidx;
-	int elen;
-
-	struct bc_msg_ack pending_msg[MAX_PENDING_MSG];
-	int pending_msg_len;
-};
-
-enum opcode
-{
-	OP_HEARTBEAT,
-	OP_JOIN,
-	OP_MSG,
-	OP_LEAVE
-};
+#include "common.h"
+#include "network.h"
+#include "event.h"
 
 static struct bc_group ZERO_GROUP;
 
 size_t bc_group_struct_size(void)
 {
 	return sizeof(struct bc_group);
-}
-
-/* get port (IPv4 or IPv6) */
-static in_port_t get_in_port(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET)
-        return (((struct sockaddr_in*)sa)->sin_port);
-    return (((struct sockaddr_in6*)sa)->sin6_port);
-}
-
-/* return the sockaddr_in depending on current
- * family used (IPv4, v6) */
-static void *get_in_addr(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET)
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
-
-static char *straddr(struct sockaddr *sa)
-{
-	static char s[INET6_ADDRSTRLEN];
-	inet_ntop(sa->sa_family, get_in_addr(sa), s, sizeof s);
-	return s;
-}
-
-/* starts server on host port
- * Return values:
- * 0 on success
- * < 0 on getaddrinfo error
- * 1 on system error
- *
- * On success fd value is a valid file descriptor */
-static int start_server(int *fd, char *host, char *port, struct sockaddr *addr)
-{
-	struct addrinfo hints;
-	struct addrinfo *result, *rp;
-	int sfd, rc;
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC; /* Allow IPv4 or IPv6 */
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE;
-	hints.ai_protocol = 0; /* Any protocol */
-	hints.ai_canonname = NULL;
-	hints.ai_addr = NULL;
-	hints.ai_next = NULL;
-
-	rc = getaddrinfo(host, port, &hints, &result);
-
-	if (rc != 0)
-	{
-		/* We return the getaddrinfo error as a negative integer */
-		return -rc;
-	}
-
-	for (rp = result; rp != NULL; rp = rp->ai_next)
-	{
-		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-
-		if (sfd == -1)
-		{
-			/* Could not create the socket for this address,
-			 * try the next one */
-			continue;
-		}
-
-		if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
-			break;
-
-		close(sfd);
-	}
-
-	if (rp == NULL)
-		return 1;
-
-	*addr = *rp->ai_addr;
-
-	freeaddrinfo(result);
-
-	/* We set non blocking socket to use polling */
-	if (ioctl(sfd, FIONBIO, (char*)&rc) < 0)
-		return 1;
-
-	if (listen(sfd, MAX_LISTEN_QUEUE) != 0)
-		return 1;
-
-	*fd = sfd;
-
-	return 0;
-}
-
-static int connect_server(int *fd, char *host, char *port, struct sockaddr *addr)
-{
-	struct addrinfo hints;
-	struct addrinfo *result, *rp;
-	int sfd, rc;
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC; /* Allow IPv4 or IPv6 */
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = 0;
-	hints.ai_protocol = 0;
-
-	rc = getaddrinfo(host, port, &hints, &result);
-
-	if (rc != 0)
-	{
-		/* We return the getaddrinfo error as a negative integer */
-		return -rc;
-	}
-
-	for (rp = result; rp != NULL; rp = rp->ai_next)
-	{
-		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-
-		if (sfd == -1)
-		{
-			/* Could not create the socket for this address,
-			 * try the next one */
-			continue;
-		}
-
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
-			break;
-
-		close(sfd);
-	}
-
-	if (rp == NULL)
-		return 1;
-
-	*addr = *rp->ai_addr;
-
-	freeaddrinfo(result);
-
-	/* We set non blocking socket to use polling */
-	if (ioctl(sfd, FIONBIO, (char*)&rc) < 0)
-		return 1;
-
-	*fd = sfd;
-
-	return 0;
 }
 
 /* Note: On error handling and resource cleaning
@@ -340,45 +136,6 @@ void bc_leave(struct bc_group *grp)
 	}
 }
 
-
-/* Push an event to the grp event queue
- * Return values:
- * NULL if the queue is full
- * pointer to the pushed event otherwise */
-static struct bc_event *push_event(struct bc_group *grp, int type,
-								  struct sockaddr *addr)
-{
-	int idx;
-	struct bc_event *ev;
-
-	if (grp->elen >= EVENT_QUEUE_CAPACITY)
-		return NULL;
-
-	idx = (grp->eidx + grp->elen) % EVENT_QUEUE_CAPACITY;
-	grp->elen++;
-
-	ev = &grp->equeue[idx];
-	ev->type = type;
-	ev->addr = *addr;
-	gettimeofday(&ev->localstamp, NULL);
-
-	return ev;
-}
-
-/* pop the event on top of the event queue in the ev parameter.
- * Return values:
- * -1 if the queue is empty
- * 0 otherwise */
-static int pop_event(struct bc_group *grp, struct bc_event *ev)
-{
-	if (grp->elen <= 0)
-		return -1;
-
-	*ev = grp->equeue[grp->eidx];
-	grp->elen--;
-	grp->eidx = (grp->eidx + 1) % EVENT_QUEUE_CAPACITY;
-	return 0;
-}
 
 static int accept_client(struct bc_group *grp)
 {
